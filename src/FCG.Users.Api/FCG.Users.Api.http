@@ -1,0 +1,39 @@
+@FCG.Users.Api_HostAddress = http://localhost:5260
+@Token = replace-with-access-token
+
+GET {{FCG.Users.Api_HostAddress}}/
+Accept: application/json
+
+###
+
+GET {{FCG.Users.Api_HostAddress}}/health
+Accept: application/json
+
+###
+
+POST {{FCG.Users.Api_HostAddress}}/api/auth/register
+Content-Type: application/json
+
+{
+  "name": "Ada Lovelace",
+  "email": "ada@example.com",
+  "password": "Strong1!"
+}
+
+###
+
+POST {{FCG.Users.Api_HostAddress}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "ada@example.com",
+  "password": "Strong1!"
+}
+
+###
+
+GET {{FCG.Users.Api_HostAddress}}/api/me/profile
+Authorization: Bearer {{Token}}
+Accept: application/json
+
+###

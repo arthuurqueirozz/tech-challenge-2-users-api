@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: users-api-config
+data:
+  ASPNETCORE_ENVIRONMENT: Production
+  ASPNETCORE_HTTP_PORTS: "8080"
+  Jwt__Issuer: FCG
+  Jwt__Audience: FCG
+  Jwt__AccessTokenMinutes: "120"
+  RabbitMq__Host: rabbitmq
+  RabbitMq__Port: "5672"
+  RabbitMq__VirtualHost: /
+  AdminSeed__Enabled: "false"
+  AdminSeed__Name: FCG Admin
+  AdminSeed__Email: admin@fcg.local

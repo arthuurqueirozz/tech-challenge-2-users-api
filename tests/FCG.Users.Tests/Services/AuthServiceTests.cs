@@ -1,6 +1,5 @@
 using FCG.IntegrationEvents.V1;
 using FCG.Users.Api.Contracts.Auth;
-using FCG.Users.Api.Messaging;
 using FCG.Users.Api.Services;
 using FCG.Users.Domain.Abstractions;
 using FCG.Users.Domain.Common;
@@ -15,12 +14,12 @@ public sealed class AuthServiceTests
         new(2026, 7, 6, 12, 0, 0, TimeSpan.Zero);
 
     [Fact]
-    public async Task RegisterAsync_PersistsUserBeforePublishingExactEvent()
+    public async Task RegisterAsync_PersistsUserAndOutboxMessageInSingleSave()
     {
         var repository = new FakeUserRepository();
         var unitOfWork = new FakeUnitOfWork();
-        var publisher = new FakePublisher(() => unitOfWork.WasSaved);
-        var service = CreateService(repository, unitOfWork, publisher);
+        var outbox = new FakeIntegrationEventOutbox(() => unitOfWork.WasSaved);
+        var service = CreateService(repository, unitOfWork, outbox);
         var request = new RegisterRequest(
             "  Ada Lovelace  ",
             "ADA@Example.com",
@@ -31,9 +30,9 @@ public sealed class AuthServiceTests
             TestContext.Current.CancellationToken);
 
         var stored = Assert.Single(repository.Users);
-        var message = Assert.Single(publisher.Messages);
+        var message = Assert.Single(outbox.Messages);
         Assert.True(unitOfWork.WasSaved);
-        Assert.True(publisher.PersistenceWasCompletedWhenPublished);
+        Assert.False(outbox.PersistenceWasCompletedWhenEnqueued);
         Assert.Equal(stored.Id, message.UserId);
         Assert.Equal(stored.CreatedAtUtc, message.OccurredAtUtc);
         Assert.Equal("Ada Lovelace", message.Name);
@@ -52,7 +51,7 @@ public sealed class AuthServiceTests
         var service = CreateService(
             repository,
             new FakeUnitOfWork(),
-            new FakePublisher(() => false));
+            new FakeIntegrationEventOutbox(() => false));
 
         await Assert.ThrowsAsync<DomainConflictException>(
             () => service.RegisterAsync(
@@ -71,7 +70,7 @@ public sealed class AuthServiceTests
         var service = CreateService(
             repository,
             new FakeUnitOfWork(),
-            new FakePublisher(() => false));
+            new FakeIntegrationEventOutbox(() => false));
 
         var response = await service.LoginAsync(
             new LoginRequest("ada@example.com", "ValidPass1!"),
@@ -89,7 +88,7 @@ public sealed class AuthServiceTests
         var service = CreateService(
             repository,
             new FakeUnitOfWork(),
-            new FakePublisher(() => false));
+            new FakeIntegrationEventOutbox(() => false));
 
         await Assert.ThrowsAsync<ApplicationUnauthorizedException>(
             () => service.LoginAsync(
@@ -100,13 +99,13 @@ public sealed class AuthServiceTests
     private static AuthService CreateService(
         FakeUserRepository repository,
         FakeUnitOfWork unitOfWork,
-        FakePublisher publisher) =>
+        FakeIntegrationEventOutbox outbox) =>
         new(
             repository,
             unitOfWork,
             new FakePasswordHasher(),
             new FakeJwtTokenService(),
-            publisher,
+            outbox,
             new FixedTimeProvider(Now),
             NullLogger<AuthService>.Instance);
 
@@ -168,17 +167,17 @@ public sealed class AuthServiceTests
             new("generated-token", Now.AddHours(2).UtcDateTime);
     }
 
-    private sealed class FakePublisher(Func<bool> persistenceWasCompleted)
-        : IUserCreatedPublisher
+    private sealed class FakeIntegrationEventOutbox(Func<bool> persistenceWasCompleted)
+        : IIntegrationEventOutbox
     {
         public List<UserCreatedEvent> Messages { get; } = [];
-        public bool PersistenceWasCompletedWhenPublished { get; private set; }
+        public bool PersistenceWasCompletedWhenEnqueued { get; private set; }
 
-        public Task PublishAsync(
+        public Task AddAsync(
             UserCreatedEvent message,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken = default)
         {
-            PersistenceWasCompletedWhenPublished = persistenceWasCompleted();
+            PersistenceWasCompletedWhenEnqueued = persistenceWasCompleted();
             Messages.Add(message);
             return Task.CompletedTask;
         }

@@ -1,5 +1,7 @@
+using FCG.IntegrationEvents.V1;
 using FCG.Users.Domain.Entities;
 using FCG.Users.Infrastructure.Persistence;
+using FCG.Users.Infrastructure.Persistence.Outbox;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 
@@ -44,6 +46,35 @@ public sealed class PersistenceTests
 
         await Assert.ThrowsAsync<DbUpdateException>(
             () => context.SaveChangesAsync(cancellationToken));
+    }
+
+    [Fact]
+    public async Task Outbox_PersistsPendingUserCreatedEvent()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync(cancellationToken);
+        await using var context = CreateContext(connection);
+        await context.Database.EnsureCreatedAsync(cancellationToken);
+        var outbox = new IntegrationEventOutbox(context);
+        var message = new UserCreatedEvent(
+            Guid.NewGuid(),
+            new DateTime(2026, 7, 6, 12, 0, 0, DateTimeKind.Utc),
+            Guid.NewGuid(),
+            "Ada Lovelace",
+            "ada@example.com");
+
+        await outbox.AddAsync(message, cancellationToken);
+        await context.SaveChangesAsync(cancellationToken);
+        context.ChangeTracker.Clear();
+
+        var stored = await context.IntegrationOutboxMessages
+            .SingleAsync(cancellationToken);
+
+        Assert.Equal(message.EventId, stored.Id);
+        Assert.Equal(UserCreatedEvent.MessageType, stored.MessageType);
+        Assert.Null(stored.ProcessedAtUtc);
+        Assert.Contains("ada@example.com", stored.Payload);
     }
 
     private static UsersDbContext CreateContext(SqliteConnection connection)

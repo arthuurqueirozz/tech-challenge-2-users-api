@@ -1,5 +1,6 @@
 using System.Text;
 using FCG.Users.Api.Configuration;
+using FCG.Users.Api.Health;
 using FCG.Users.Api.Messaging;
 using FCG.Users.Api.Services;
 using FCG.Users.Api.Shared;
@@ -63,6 +64,7 @@ public static class DependencyInjection
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IUserProfileService, UserProfileService>();
         services.AddScoped<IUserCreatedPublisher, MassTransitUserCreatedPublisher>();
+        services.AddHostedService<OutboxPublisherBackgroundService>();
 
         services.AddProblemDetails();
         services.AddExceptionHandler<ApiExceptionHandler>();
@@ -108,7 +110,7 @@ public static class DependencyInjection
 
             options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
             {
-                Description = "Informe o JWT no formato: Bearer {token}",
+                Description = "Informe apenas o JWT. O Swagger UI adiciona o prefixo Bearer automaticamente.",
                 Name = "Authorization",
                 In = ParameterLocation.Header,
                 Type = SecuritySchemeType.Http,
@@ -123,6 +125,9 @@ public static class DependencyInjection
             .AddHealthChecks()
             .AddDbContextCheck<UsersDbContext>(
                 "users-sqlserver",
+                tags: ["ready"])
+            .AddCheck<RabbitMqHealthCheck>(
+                "rabbitmq",
                 tags: ["ready"]);
 
         return services;

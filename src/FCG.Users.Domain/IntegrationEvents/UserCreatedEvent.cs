@@ -5,4 +5,7 @@ public sealed record UserCreatedEvent(
     DateTime OccurredAtUtc,
     Guid UserId,
     string Name,
-    string Email);
+    string Email)
+{
+    public const string MessageType = "FCG.IntegrationEvents.V1.UserCreatedEvent";
+}

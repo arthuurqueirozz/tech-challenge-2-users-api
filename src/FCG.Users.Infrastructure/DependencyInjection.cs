@@ -3,6 +3,7 @@ using FCG.Users.Domain.Abstractions;
 using FCG.Users.Domain.Entities;
 using FCG.Users.Infrastructure.Configuration;
 using FCG.Users.Infrastructure.Persistence;
+using FCG.Users.Infrastructure.Persistence.Outbox;
 using FCG.Users.Infrastructure.Security;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -45,6 +46,7 @@ public static class DependencyInjection
             .ValidateOnStart();
 
         services.AddScoped<IUserRepository, UserRepository>();
+        services.AddScoped<IIntegrationEventOutbox, IntegrationEventOutbox>();
         services.AddScoped<IUnitOfWork>(
             provider => provider.GetRequiredService<UsersDbContext>());
         services.AddSingleton<IPasswordHasher, IdentityPasswordHasher>();

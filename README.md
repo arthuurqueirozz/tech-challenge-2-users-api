@@ -6,7 +6,7 @@ responsavel por:
 - cadastrar usuarios;
 - autenticar credenciais e emitir tokens JWT;
 - autorizar acesso ao perfil autenticado;
-- publicar `UserCreatedEvent` apos persistir um novo usuario.
+- registrar `UserCreatedEvent` em outbox transacional e publicar o evento no RabbitMQ.
 
 O `NotificationsAPI` consome esse evento e simula o envio do e-mail de
 boas-vindas.
@@ -39,17 +39,19 @@ boas-vindas.
 └── TechChallenge.Users.sln
 ```
 
-O banco deste microsservico contem apenas a tabela `Users`. A migration
-inicial fica em `FCG.Users.Infrastructure/Persistence/Migrations`.
+O banco deste microsservico contem a tabela `Users` e a tabela tecnica
+`IntegrationOutboxMessages`, usada para garantir a publicacao de eventos apos
+falhas temporarias do RabbitMQ. As migrations ficam em
+`FCG.Users.Infrastructure/Persistence/Migrations`.
 
 ## Endpoints
 
 | Metodo | Rota | Autenticacao | Finalidade |
 |---|---|---|---|
-| `POST` | `/api/auth/register` | Anonima | Cadastra usuario, emite JWT e publica o evento. |
+| `POST` | `/api/auth/register` | Anonima | Cadastra usuario, emite JWT e registra o evento para publicacao confiavel. |
 | `POST` | `/api/auth/login` | Anonima | Valida credenciais e emite JWT. |
 | `GET` | `/api/me/profile` | Bearer JWT | Retorna o perfil do usuario autenticado. |
-| `GET` | `/health` | Anonima | Readiness, incluindo conexao com SQL Server. |
+| `GET` | `/health` | Anonima | Readiness, incluindo conexao com SQL Server e RabbitMQ. |
 | `GET` | `/health/live` | Anonima | Liveness do processo. |
 | `GET` | `/swagger/index.html` | Anonima | Interface Swagger em `Development`. |
 
@@ -79,7 +81,9 @@ O contrato usa o namespace `FCG.IntegrationEvents.V1`.
 - `Name`
 - `Email`
 
-O evento so e publicado depois que o usuario foi salvo.
+O evento e gravado no outbox na mesma persistencia do usuario. Um servico em
+background publica o evento no RabbitMQ e tenta novamente se houver falha
+temporaria no broker.
 
 ## Variaveis de ambiente
 
@@ -141,7 +145,9 @@ dotnet run --project src/FCG.Users.Api/FCG.Users.Api.csproj
 
 A migration e aplicada automaticamente na inicializacao. Em
 `Development`, abra `/swagger/index.html`, execute cadastro ou login, clique em
-`Authorize`, informe `Bearer {token}` e chame `/api/me/profile`.
+`Authorize`, informe apenas o token JWT sem o prefixo `Bearer` e chame
+`/api/me/profile`. Em chamadas manuais com `curl` ou outro cliente HTTP, use o
+cabecalho `Authorization: Bearer {token}`.
 
 O administrador inicial e opcional. Para cria-lo:
 
@@ -163,7 +169,7 @@ dotnet run --project tests/FCG.Users.Tests/FCG.Users.Tests.csproj
 ```
 
 Os testes cobrem regras de dominio, validadores, hash de senha, claims JWT,
-cadastro, login, ordem entre persistencia e publicacao do evento, repositorio e
+cadastro, login, enfileiramento transacional do evento, outbox, repositorio e
 restricao de e-mail unico.
 
 ## Docker

@@ -1,6 +1,5 @@
 using FCG.IntegrationEvents.V1;
 using FCG.Users.Api.Contracts.Auth;
-using FCG.Users.Api.Messaging;
 using FCG.Users.Domain.Abstractions;
 using FCG.Users.Domain.Common;
 using FCG.Users.Domain.Entities;
@@ -12,7 +11,7 @@ public sealed class AuthService(
     IUnitOfWork unitOfWork,
     IPasswordHasher passwordHasher,
     IJwtTokenService jwtTokenService,
-    IUserCreatedPublisher eventPublisher,
+    IIntegrationEventOutbox integrationEventOutbox,
     TimeProvider timeProvider,
     ILogger<AuthService> logger)
     : IAuthService
@@ -37,7 +36,6 @@ public sealed class AuthService(
             timeProvider.GetUtcNow().UtcDateTime);
 
         await userRepository.AddAsync(user, cancellationToken);
-        await unitOfWork.SaveChangesAsync(cancellationToken);
 
         var message = new UserCreatedEvent(
             Guid.NewGuid(),
@@ -46,10 +44,11 @@ public sealed class AuthService(
             user.Name,
             user.Email.Value);
 
-        await eventPublisher.PublishAsync(message, cancellationToken);
+        await integrationEventOutbox.AddAsync(message, cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
 
         logger.LogInformation(
-            "User registered and UserCreatedEvent published. UserId: {UserId}, EventId: {EventId}",
+            "User registered and UserCreatedEvent enqueued. UserId: {UserId}, EventId: {EventId}",
             user.Id,
             message.EventId);
 

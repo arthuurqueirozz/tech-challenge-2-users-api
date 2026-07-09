@@ -109,19 +109,18 @@ Credenciais, connection strings e a chave JWT nao ficam no
 
 ## Executar localmente
 
-Inicie SQL Server e RabbitMQ. Os valores abaixo sao apenas para
-desenvolvimento local:
+Inicie SQL Server e RabbitMQ substituindo os placeholders por valores locais:
 
 ```bash
 docker run --name tc2-users-sql \
   -e ACCEPT_EULA=Y \
-  -e MSSQL_SA_PASSWORD='LocalPass1!' \
+  -e MSSQL_SA_PASSWORD='<sql-password>' \
   -p 1433:1433 \
   -d mcr.microsoft.com/mssql/server:2022-latest
 
 docker run --name tc2-rabbitmq \
-  -e RABBITMQ_DEFAULT_USER=tc2 \
-  -e RABBITMQ_DEFAULT_PASS='local-password' \
+  -e RABBITMQ_DEFAULT_USER='<rabbitmq-username>' \
+  -e RABBITMQ_DEFAULT_PASS='<rabbitmq-password>' \
   -p 5672:5672 \
   -p 15672:15672 \
   -d rabbitmq:4-management
@@ -130,10 +129,10 @@ docker run --name tc2-rabbitmq \
 Configure a aplicacao:
 
 ```bash
-export ConnectionStrings__UsersDatabase='Server=localhost,1433;Database=FcgUsersDb;User Id=sa;Password=LocalPass1!;TrustServerCertificate=True;Encrypt=False'
-export Jwt__Key='local-development-key-with-at-least-32-bytes'
-export RabbitMq__Username='tc2'
-export RabbitMq__Password='local-password'
+export ConnectionStrings__UsersDatabase='Server=localhost,1433;Database=FcgUsersDb;User Id=sa;Password=<sql-password>;TrustServerCertificate=True;Encrypt=False'
+export Jwt__Key='<jwt-key-with-at-least-32-bytes>'
+export RabbitMq__Username='<rabbitmq-username>'
+export RabbitMq__Password='<rabbitmq-password>'
 ```
 
 Restaure e execute:
@@ -153,7 +152,7 @@ O administrador inicial e opcional. Para cria-lo:
 
 ```bash
 export AdminSeed__Enabled=true
-export AdminSeed__Password='AdminPass1!'
+export AdminSeed__Password='<admin-password>'
 ```
 
 ## Testes

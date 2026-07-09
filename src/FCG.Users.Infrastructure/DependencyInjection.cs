@@ -23,7 +23,12 @@ public static class DependencyInjection
                 "Connection string 'UsersDatabase' is not configured.");
 
         services.AddDbContext<UsersDbContext>(options =>
-            options.UseSqlServer(connectionString));
+            options.UseSqlServer(
+                connectionString,
+                sql => sql.EnableRetryOnFailure(
+                    maxRetryCount: 10,
+                    maxRetryDelay: TimeSpan.FromSeconds(10),
+                    errorNumbersToAdd: null)));
 
         services
             .AddOptions<JwtOptions>()

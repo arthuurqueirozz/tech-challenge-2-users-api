@@ -1,15 +1,15 @@
 # FIAP Cloud Games - UsersAPI
 
-Microsservico de usuarios da Fase 2 do Tech Challenge FIAP. Ele e
+Microsservico de usuarios evoluido para a Fase 3 do Tech Challenge FIAP. Ele e
 responsavel por:
 
 - cadastrar usuarios;
 - autenticar credenciais e emitir tokens JWT;
 - autorizar acesso ao perfil autenticado;
-- registrar `UserCreatedEvent` em outbox transacional e publicar o evento no RabbitMQ.
+- registrar `UserCreatedEvent` em outbox transacional e publicar JSON direto no SQS.
 
-O `NotificationsAPI` consome esse evento e simula o envio do e-mail de
-boas-vindas.
+A Lambda Notifications consome esse evento e registra a simulacao de boas-vindas
+no DynamoDB. A baseline da Fase 2 foi preservada na tag `fase-2-final`.
 
 ## Tecnologias
 
@@ -17,8 +17,7 @@ boas-vindas.
 - ASP.NET Core Minimal APIs
 - Entity Framework Core 8
 - SQL Server
-- MassTransit 8.5.10
-- RabbitMQ
+- AWS SDK SQS 4.0.100.13
 - JWT Bearer
 - Serilog
 - xUnit
@@ -41,7 +40,7 @@ boas-vindas.
 
 O banco deste microsservico contem a tabela `Users` e a tabela tecnica
 `IntegrationOutboxMessages`, usada para garantir a publicacao de eventos apos
-falhas temporarias do RabbitMQ. As migrations ficam em
+falhas temporarias do SQS. As migrations ficam em
 `FCG.Users.Infrastructure/Persistence/Migrations`.
 
 ## Endpoints
@@ -51,7 +50,7 @@ falhas temporarias do RabbitMQ. As migrations ficam em
 | `POST` | `/api/auth/register` | Anonima | Cadastra usuario, emite JWT e registra o evento para publicacao confiavel. |
 | `POST` | `/api/auth/login` | Anonima | Valida credenciais e emite JWT. |
 | `GET` | `/api/me/profile` | Bearer JWT | Retorna o perfil do usuario autenticado. |
-| `GET` | `/health` | Anonima | Readiness, incluindo conexao com SQL Server e RabbitMQ. |
+| `GET` | `/health` | Anonima | Readiness com SQL Server; cadastro continua disponivel se SQS falhar, pois o outbox e duravel. |
 | `GET` | `/health/live` | Anonima | Liveness do processo. |
 | `GET` | `/swagger/index.html` | Anonima | Interface Swagger em `Development`. |
 
@@ -82,8 +81,12 @@ O contrato usa o namespace `FCG.IntegrationEvents.V1`.
 - `Email`
 
 O evento e gravado no outbox na mesma persistencia do usuario. Um servico em
-background publica o evento no RabbitMQ e tenta novamente se houver falha
-temporaria no broker.
+background publica o evento no SQS e tenta novamente se houver falha.
+O EventId e o payload persistidos sao preservados; ProcessedAtUtc so e marcado
+apos SendMessage concluir. O backoff existente e mantido. Um envio aceito cuja
+resposta se perca pode ser repetido; a Lambda trata duplicidade por EventId.
+RabbitMQ/MassTransit foram removidos deste servico porque nao havia outro uso.
+O worker registra as falhas; a saude SQL nao comprova entrega das notificacoes.
 
 ## Variaveis de ambiente
 
@@ -94,11 +97,11 @@ temporaria no broker.
 | `Jwt__Audience` | Nao | Audiencia esperada no JWT. |
 | `Jwt__Key` | Sim | Chave simetrica com no minimo 32 bytes. |
 | `Jwt__AccessTokenMinutes` | Nao | Validade do token em minutos. |
-| `RabbitMq__Host` | Nao | Nome DNS ou host do RabbitMQ. |
-| `RabbitMq__Port` | Nao | Porta AMQP, normalmente `5672`. |
-| `RabbitMq__VirtualHost` | Nao | Virtual host do broker. |
-| `RabbitMq__Username` | Sim | Usuario do RabbitMQ. |
-| `RabbitMq__Password` | Sim | Senha do RabbitMQ. |
+| `Sqs__Region` | Nao | Regiao AWS; us-east-1. |
+| `Sqs__QueueUrl` | Nao | URL HTTPS da fila de cadastro na mesma regiao. |
+| `AWS_ACCESS_KEY_ID` | Sim | Credencial temporaria da role users publisher. |
+| `AWS_SECRET_ACCESS_KEY` | Sim | Segredo temporario. |
+| `AWS_SESSION_TOKEN` | Sim | Token da sessao STS; renovar antes de expirar. |
 | `AdminSeed__Enabled` | Nao | Habilita a criacao idempotente do administrador inicial. |
 | `AdminSeed__Name` | Nao | Nome do administrador inicial. |
 | `AdminSeed__Email` | Nao | E-mail do administrador inicial. |
@@ -109,7 +112,7 @@ Credenciais, connection strings e a chave JWT nao ficam no
 
 ## Executar localmente
 
-Inicie SQL Server e RabbitMQ substituindo os placeholders por valores locais:
+Inicie SQL Server substituindo os placeholders por valores locais:
 
 ```bash
 docker run --name tc2-users-sql \
@@ -118,12 +121,6 @@ docker run --name tc2-users-sql \
   -p 1433:1433 \
   -d mcr.microsoft.com/mssql/server:2022-latest
 
-docker run --name tc2-rabbitmq \
-  -e RABBITMQ_DEFAULT_USER='<rabbitmq-username>' \
-  -e RABBITMQ_DEFAULT_PASS='<rabbitmq-password>' \
-  -p 5672:5672 \
-  -p 15672:15672 \
-  -d rabbitmq:4-management
 ```
 
 Configure a aplicacao:
@@ -131,8 +128,10 @@ Configure a aplicacao:
 ```bash
 export ConnectionStrings__UsersDatabase='Server=localhost,1433;Database=FcgUsersDb;User Id=sa;Password=<sql-password>;TrustServerCertificate=True;Encrypt=False'
 export Jwt__Key='<jwt-key-with-at-least-32-bytes>'
-export RabbitMq__Username='<rabbitmq-username>'
-export RabbitMq__Password='<rabbitmq-password>'
+export Sqs__Region=us-east-1
+export Sqs__QueueUrl='https://sqs.us-east-1.amazonaws.com/ACCOUNT_ID/fcg-fase3-user-created'
+# Injete AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY e AWS_SESSION_TOKEN da role
+# de publicacao via mecanismo local. Nunca use a credencial de deploy no container.
 ```
 
 Restaure e execute:
@@ -170,6 +169,8 @@ dotnet run --project tests/FCG.Users.Tests/FCG.Users.Tests.csproj
 Os testes cobrem regras de dominio, validadores, hash de senha, claims JWT,
 cadastro, login, enfileiramento transacional do evento, outbox, repositorio e
 restricao de e-mail unico.
+Incluem falha de envio SQS, persistencia do retry/backoff e recuperacao usando
+o mesmo EventId. O teste do outbox usa SQLite real e um cliente SQS simulado.
 
 ## Docker
 
@@ -209,6 +210,7 @@ kubectl apply -f k8s/service.yaml
 O arquivo `secret.local.yaml` e ignorado pelo Git. Dentro do cluster, a API e
 acessada pelos demais componentes em `http://users-api:80`.
 
-O `docker-compose.yml` que executara os quatro microsservicos juntos sera
-mantido no repositorio da CatalogAPI, conforme o planejamento da solucao sem
-um quinto repositorio opcional.
+O ensaio dos produtores da Fase 3 esta em `compose.stage4.yaml` no repositorio
+[Orchestration](https://github.com/arthuurqueirozz/tech-challenge-3-orchestration).
+Ele prepara credenciais temporarias e configura as tres APIs com SQL/RabbitMQ.
+A stack Kind/Kong final pertence a orquestracao e sera validada nas etapas seguintes.

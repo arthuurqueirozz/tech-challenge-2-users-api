@@ -1,6 +1,7 @@
 using System.Text;
+using Amazon;
+using Amazon.SQS;
 using FCG.Users.Api.Configuration;
-using FCG.Users.Api.Health;
 using FCG.Users.Api.Messaging;
 using FCG.Users.Api.Services;
 using FCG.Users.Api.Shared;
@@ -9,7 +10,6 @@ using FCG.Users.Infrastructure;
 using FCG.Users.Infrastructure.Configuration;
 using FCG.Users.Infrastructure.Persistence;
 using FluentValidation;
-using MassTransit;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
@@ -27,43 +27,23 @@ public static class DependencyInjection
         services.AddUsersInfrastructure(configuration);
 
         services
-            .AddOptions<RabbitMqOptions>()
-            .Bind(configuration.GetSection(RabbitMqOptions.SectionName))
-            .ValidateDataAnnotations()
-            .Validate(options => !string.IsNullOrWhiteSpace(options.Host),
-                "RabbitMq:Host is required.")
-            .Validate(options => !string.IsNullOrWhiteSpace(options.VirtualHost),
-                "RabbitMq:VirtualHost is required.")
-            .Validate(options => !string.IsNullOrWhiteSpace(options.Username),
-                "RabbitMq:Username is required.")
-            .Validate(options => !string.IsNullOrWhiteSpace(options.Password),
-                "RabbitMq:Password is required.")
+            .AddOptions<SqsOptions>()
+            .Bind(configuration.GetSection(SqsOptions.SectionName))
+            .Validate(options => options.HasValidQueueUrl(),
+                "Sqs:QueueUrl must be an HTTPS SQS queue URL in Sqs:Region.")
             .ValidateOnStart();
 
-        services.AddMassTransit(configurator =>
+        services.AddSingleton<IAmazonSQS>(provider => new AmazonSQSClient(new AmazonSQSConfig
         {
-            configurator.UsingRabbitMq((context, rabbit) =>
-            {
-                var options = context
-                    .GetRequiredService<IOptions<RabbitMqOptions>>()
-                    .Value;
-
-                rabbit.Host(
-                    options.Host,
-                    options.Port,
-                    options.VirtualHost,
-                    host =>
-                    {
-                        host.Username(options.Username);
-                        host.Password(options.Password);
-                    });
-            });
-        });
+            RegionEndpoint = RegionEndpoint.GetBySystemName(provider.GetRequiredService<IOptions<SqsOptions>>().Value.Region),
+            Timeout = TimeSpan.FromSeconds(10),
+            MaxErrorRetry = 2
+        }));
 
         services.AddValidatorsFromAssemblyContaining<RegisterRequestValidator>();
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IUserProfileService, UserProfileService>();
-        services.AddScoped<IUserCreatedPublisher, MassTransitUserCreatedPublisher>();
+        services.AddScoped<IUserCreatedPublisher, SqsUserCreatedPublisher>();
         services.AddHostedService<OutboxPublisherBackgroundService>();
 
         services.AddProblemDetails();
@@ -125,9 +105,6 @@ public static class DependencyInjection
             .AddHealthChecks()
             .AddDbContextCheck<UsersDbContext>(
                 "users-sqlserver",
-                tags: ["ready"])
-            .AddCheck<RabbitMqHealthCheck>(
-                "rabbitmq",
                 tags: ["ready"]);
 
         return services;

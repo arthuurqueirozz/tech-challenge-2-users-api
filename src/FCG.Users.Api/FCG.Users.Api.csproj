@@ -9,7 +9,7 @@
 
   <ItemGroup>
     <PackageReference Include="FluentValidation.DependencyInjectionExtensions" Version="12.1.1" />
-    <PackageReference Include="MassTransit.RabbitMQ" Version="8.5.10" />
+    <PackageReference Include="AWSSDK.SQS" Version="4.0.100.13" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.28" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.28" />
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="8.0.28" />
@@ -17,12 +17,12 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="RabbitMQ.Client" Version="7.2.1" />
     <PackageReference Include="Serilog.AspNetCore" Version="8.0.3" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="FCG.Users.Tests" />
     <ProjectReference Include="..\FCG.Users.Domain\FCG.Users.Domain.csproj" />
     <ProjectReference Include="..\FCG.Users.Infrastructure\FCG.Users.Infrastructure.csproj" />
   </ItemGroup>

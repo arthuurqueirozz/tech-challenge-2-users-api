@@ -1,5 +1,22 @@
 # FIAP Cloud Games - UsersAPI
 
+## Métricas da Fase 3
+
+`GET /metrics` expõe Prometheus (prometheus-net.AspNetCore 8.2.1).
+`fcg_http_requests_total` conta requisições de negócio; o histograma
+`fcg_http_request_duration_seconds` mede sua duração. Labels: `route` com template
+do endpoint (ou `unmatched`), `method` com verbos conhecidos/`OTHER` e `status_code`.
+Não há labels com usuários, tokens, query strings ou IDs concretos. Apenas `/api`
+é instrumentado; health e scraping são excluídos. Middleware envolve o tratamento
+de exceções para registrar o status final, inclusive 400/401/500.
+
+Prometheus/Grafana e o dashboard provisionado ficam no repositório de
+[orquestração, etapa 6](https://github.com/arthuurqueirozz/tech-challenge-3-orchestration/blob/main/docs/ETAPA-6.md).
+O scraper acrescenta `job=users-api`. `/metrics` é interno ao cluster e não deve
+receber rota pública no gateway. Contadores reiniciam com o processo; taxas usam
+`rate`, que trata resets. Gate: 29 testes UsersAPI e 33 verificações integradas
+da stack de métricas passaram.
+
 Microsservico de usuarios evoluido para a Fase 3 do Tech Challenge FIAP. Ele e
 responsavel por:
 

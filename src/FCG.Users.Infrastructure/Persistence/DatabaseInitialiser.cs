@@ -16,37 +16,39 @@ public static class DatabaseInitialiser
     {
         await using var scope = services.CreateAsyncScope();
         var provider = scope.ServiceProvider;
-        var context = provider.GetRequiredService<UsersDbContext>();
-
-        await context.Database.MigrateAsync(cancellationToken);
-
         var options = provider
             .GetRequiredService<IOptions<AdminSeedOptions>>()
             .Value;
 
-        if (!options.Enabled)
+        User? admin = null;
+        if (options.Enabled)
+        {
+            // Validate the complete seed before making any schema changes.
+            PasswordPolicy.ValidateOrThrow(options.Password);
+            var email = Email.Create(options.Email);
+            var hasher = provider.GetRequiredService<IPasswordHasher>();
+            var timeProvider = provider.GetRequiredService<TimeProvider>();
+            admin = User.Create(
+                options.Name,
+                email,
+                hasher.Hash(options.Password),
+                UserRole.Admin,
+                timeProvider.GetUtcNow().UtcDateTime);
+        }
+
+        var context = provider.GetRequiredService<UsersDbContext>();
+        await context.Database.MigrateAsync(cancellationToken);
+
+        if (admin is null)
         {
             return;
         }
 
         var repository = provider.GetRequiredService<IUserRepository>();
-        var email = Email.Create(options.Email);
-
-        if (await repository.GetByEmailAsync(email, cancellationToken) is not null)
+        if (await repository.GetByEmailAsync(admin.Email, cancellationToken) is not null)
         {
             return;
         }
-
-        PasswordPolicy.ValidateOrThrow(options.Password);
-
-        var hasher = provider.GetRequiredService<IPasswordHasher>();
-        var timeProvider = provider.GetRequiredService<TimeProvider>();
-        var admin = User.Create(
-            options.Name,
-            email,
-            hasher.Hash(options.Password),
-            UserRole.Admin,
-            timeProvider.GetUtcNow().UtcDateTime);
 
         await repository.AddAsync(admin, cancellationToken);
         await provider

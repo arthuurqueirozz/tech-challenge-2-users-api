@@ -1,24 +1,51 @@
 # FIAP Cloud Games - UsersAPI
 
-Microsservico de usuarios da Fase 2 do Tech Challenge FIAP. Ele e
+## Execução integrada da Fase 3
+
+O [README central de orquestração](https://github.com/arthuurqueirozz/tech-challenge-3-orchestration)
+contém o deploy completo no Kind, configuração AWS, acesso pelo Kong, dashboard,
+teste integrado e encerramento. Use esse guia para reproduzir a entrega.
+Arquivos de Compose/Kubernetes e comandos individuais preservados neste
+repositório servem a desenvolvimento e histórico; a stack final é mantida na
+orquestração e não executa a NotificationsAPI antiga.
+
+Código da Fase 3 na branch `fase-3`; baseline preservada em `fase-2-final`.
+
+## Métricas da Fase 3
+
+`GET /metrics` expõe Prometheus (prometheus-net.AspNetCore 8.2.1).
+`fcg_http_requests_total` conta requisições de negócio; o histograma
+`fcg_http_request_duration_seconds` mede sua duração. Labels: `route` com template
+do endpoint (ou `unmatched`), `method` com verbos conhecidos/`OTHER` e `status_code`.
+Não há labels com usuários, tokens, query strings ou IDs concretos. Apenas `/api`
+é instrumentado; health e scraping são excluídos. Middleware envolve o tratamento
+de exceções para registrar o status final, inclusive 400/401/500.
+
+Prometheus/Grafana e o dashboard provisionado ficam no repositório de
+[orquestração, etapa 6](https://github.com/arthuurqueirozz/tech-challenge-3-orchestration/blob/main/docs/ETAPA-6.md).
+O scraper acrescenta `job=users-api`. `/metrics` é interno ao cluster e não deve
+receber rota pública no gateway. Contadores reiniciam com o processo; taxas usam
+`rate`, que trata resets. Gate: 29 testes UsersAPI e 33 verificações integradas
+da stack de métricas passaram.
+
+Microsservico de usuarios evoluido para a Fase 3 do Tech Challenge FIAP. Ele e
 responsavel por:
 
 - cadastrar usuarios;
 - autenticar credenciais e emitir tokens JWT;
 - autorizar acesso ao perfil autenticado;
-- registrar `UserCreatedEvent` em outbox transacional e publicar o evento no RabbitMQ.
+- registrar `UserCreatedEvent` em outbox transacional e publicar JSON direto no SQS.
 
-O `NotificationsAPI` consome esse evento e simula o envio do e-mail de
-boas-vindas.
+A Lambda Notifications consome esse evento e registra a simulacao de boas-vindas
+no DynamoDB. A baseline da Fase 2 foi preservada na tag `fase-2-final`.
 
 ## Tecnologias
 
-- .NET 8
+- .NET 10
 - ASP.NET Core Minimal APIs
-- Entity Framework Core 8
+- Entity Framework Core 10
 - SQL Server
-- MassTransit 8.5.10
-- RabbitMQ
+- AWS SDK SQS 4.0.100.13
 - JWT Bearer
 - Serilog
 - xUnit
@@ -41,7 +68,7 @@ boas-vindas.
 
 O banco deste microsservico contem a tabela `Users` e a tabela tecnica
 `IntegrationOutboxMessages`, usada para garantir a publicacao de eventos apos
-falhas temporarias do RabbitMQ. As migrations ficam em
+falhas temporarias do SQS. As migrations ficam em
 `FCG.Users.Infrastructure/Persistence/Migrations`.
 
 ## Endpoints
@@ -51,7 +78,7 @@ falhas temporarias do RabbitMQ. As migrations ficam em
 | `POST` | `/api/auth/register` | Anonima | Cadastra usuario, emite JWT e registra o evento para publicacao confiavel. |
 | `POST` | `/api/auth/login` | Anonima | Valida credenciais e emite JWT. |
 | `GET` | `/api/me/profile` | Bearer JWT | Retorna o perfil do usuario autenticado. |
-| `GET` | `/health` | Anonima | Readiness, incluindo conexao com SQL Server e RabbitMQ. |
+| `GET` | `/health` | Anonima | Readiness com SQL Server; cadastro continua disponivel se SQS falhar, pois o outbox e duravel. |
 | `GET` | `/health/live` | Anonima | Liveness do processo. |
 | `GET` | `/swagger/index.html` | Anonima | Interface Swagger em `Development`. |
 
@@ -82,8 +109,12 @@ O contrato usa o namespace `FCG.IntegrationEvents.V1`.
 - `Email`
 
 O evento e gravado no outbox na mesma persistencia do usuario. Um servico em
-background publica o evento no RabbitMQ e tenta novamente se houver falha
-temporaria no broker.
+background publica o evento no SQS e tenta novamente se houver falha.
+O EventId e o payload persistidos sao preservados; ProcessedAtUtc so e marcado
+apos SendMessage concluir. O backoff existente e mantido. Um envio aceito cuja
+resposta se perca pode ser repetido; a Lambda trata duplicidade por EventId.
+RabbitMQ/MassTransit foram removidos deste servico porque nao havia outro uso.
+O worker registra as falhas; a saude SQL nao comprova entrega das notificacoes.
 
 ## Variaveis de ambiente
 
@@ -94,11 +125,11 @@ temporaria no broker.
 | `Jwt__Audience` | Nao | Audiencia esperada no JWT. |
 | `Jwt__Key` | Sim | Chave simetrica com no minimo 32 bytes. |
 | `Jwt__AccessTokenMinutes` | Nao | Validade do token em minutos. |
-| `RabbitMq__Host` | Nao | Nome DNS ou host do RabbitMQ. |
-| `RabbitMq__Port` | Nao | Porta AMQP, normalmente `5672`. |
-| `RabbitMq__VirtualHost` | Nao | Virtual host do broker. |
-| `RabbitMq__Username` | Sim | Usuario do RabbitMQ. |
-| `RabbitMq__Password` | Sim | Senha do RabbitMQ. |
+| `Sqs__Region` | Nao | Regiao AWS; us-east-1. |
+| `Sqs__QueueUrl` | Nao | URL HTTPS da fila de cadastro na mesma regiao. |
+| `AWS_ACCESS_KEY_ID` | Sim | Credencial temporaria da role users publisher. |
+| `AWS_SECRET_ACCESS_KEY` | Sim | Segredo temporario. |
+| `AWS_SESSION_TOKEN` | Sim | Token da sessao STS; renovar antes de expirar. |
 | `AdminSeed__Enabled` | Nao | Habilita a criacao idempotente do administrador inicial. |
 | `AdminSeed__Name` | Nao | Nome do administrador inicial. |
 | `AdminSeed__Email` | Nao | E-mail do administrador inicial. |
@@ -109,7 +140,7 @@ Credenciais, connection strings e a chave JWT nao ficam no
 
 ## Executar localmente
 
-Inicie SQL Server e RabbitMQ substituindo os placeholders por valores locais:
+Inicie SQL Server substituindo os placeholders por valores locais:
 
 ```bash
 docker run --name tc2-users-sql \
@@ -118,31 +149,28 @@ docker run --name tc2-users-sql \
   -p 1433:1433 \
   -d mcr.microsoft.com/mssql/server:2022-latest
 
-docker run --name tc2-rabbitmq \
-  -e RABBITMQ_DEFAULT_USER='<rabbitmq-username>' \
-  -e RABBITMQ_DEFAULT_PASS='<rabbitmq-password>' \
-  -p 5672:5672 \
-  -p 15672:15672 \
-  -d rabbitmq:4-management
 ```
 
 Configure a aplicacao:
 
 ```bash
-export ConnectionStrings__UsersDatabase='Server=localhost,1433;Database=FcgUsersDb;User Id=sa;Password=<sql-password>;TrustServerCertificate=True;Encrypt=False'
+export ConnectionStrings__UsersDatabase="$FCG_USERS_CONNECTION_STRING"
 export Jwt__Key='<jwt-key-with-at-least-32-bytes>'
-export RabbitMq__Username='<rabbitmq-username>'
-export RabbitMq__Password='<rabbitmq-password>'
+export Sqs__Region=us-east-1
+export Sqs__QueueUrl='https://sqs.us-east-1.amazonaws.com/ACCOUNT_ID/fcg-fase3-user-created'
+# Injete AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY e AWS_SESSION_TOKEN da role
+# de publicacao via mecanismo local. Nunca use a credencial de deploy no container.
 ```
 
 Restaure e execute:
 
 ```bash
 dotnet restore
+dotnet run --project src/FCG.Users.Api/FCG.Users.Api.csproj --no-launch-profile -- --migrate
 dotnet run --project src/FCG.Users.Api/FCG.Users.Api.csproj
 ```
 
-A migration e aplicada automaticamente na inicializacao. Em
+As migrations são executadas explicitamente antes de iniciar a API. Em
 `Development`, abra `/swagger/index.html`, execute cadastro ou login, clique em
 `Authorize`, informe apenas o token JWT sem o prefixo `Bearer` e chame
 `/api/me/profile`. Em chamadas manuais com `curl` ou outro cliente HTTP, use o
@@ -152,8 +180,31 @@ O administrador inicial e opcional. Para cria-lo:
 
 ```bash
 export AdminSeed__Enabled=true
+export AdminSeed__Name='<admin-name>'
+export AdminSeed__Email='<admin-email>'
 export AdminSeed__Password='<admin-password>'
+dotnet run --project src/FCG.Users.Api/FCG.Users.Api.csproj --no-launch-profile -- --migrate
 ```
+
+## Migrations administrativas — Fase 4
+
+`--migrate` aplica as migrations SQL e o seed opcional, termina com código 0 em
+sucesso e retorna código diferente de zero em falha. A flag é removida antes da
+configuração do host. Esse modo exige apenas a conexão SQL e, com o seed habilitado,
+as credenciais externas `AdminSeed__*`; não exige JWT, SQS ou credenciais AWS e
+não inicia HTTP nem workers. Nome, e-mail e senha do seed são validados antes de
+alterar o schema. Repetições conservam a conta encontrada pelo e-mail normalizado,
+sem promover usuários existentes nem trocar nome ou senha.
+
+O startup web não aplica migrations nem cria administrador. Execute `--migrate`
+antes do primeiro startup e de cada rollout, usando a mesma imagem da API. Não
+apague dados nem reverta o schema automaticamente ao voltar uma imagem. `/health`
+exige conexão SQL e ausência de migrations conhecidas pendentes; banco existente
+vazio retorna 503 sem alterar o schema. Migrations adicionais de uma versão mais
+nova não reprovam esse check. `/health/live` continua indicando apenas o processo.
+
+Na imagem Docker, acrescente `--migrate` depois do nome da imagem, sem publicar
+porta. O comando é apropriado para um Job separado do Deployment.
 
 ## Testes
 
@@ -170,6 +221,8 @@ dotnet run --project tests/FCG.Users.Tests/FCG.Users.Tests.csproj
 Os testes cobrem regras de dominio, validadores, hash de senha, claims JWT,
 cadastro, login, enfileiramento transacional do evento, outbox, repositorio e
 restricao de e-mail unico.
+Incluem falha de envio SQS, persistencia do retry/backoff e recuperacao usando
+o mesmo EventId. O teste do outbox usa SQLite real e um cliente SQS simulado.
 
 ## Docker
 
@@ -180,7 +233,7 @@ docker build -t tech-challenge-2-users-api:local .
 ```
 
 O Dockerfile usa build multi-stage e executa a imagem final com ASP.NET Core
-Runtime 8 e usuario nao root.
+Runtime 10 e usuario nao root.
 
 ## Kubernetes
 
@@ -209,6 +262,35 @@ kubectl apply -f k8s/service.yaml
 O arquivo `secret.local.yaml` e ignorado pelo Git. Dentro do cluster, a API e
 acessada pelos demais componentes em `http://users-api:80`.
 
-O `docker-compose.yml` que executara os quatro microsservicos juntos sera
-mantido no repositorio da CatalogAPI, conforme o planejamento da solucao sem
-um quinto repositorio opcional.
+O ensaio dos produtores da Fase 3 esta em `compose.stage4.yaml` no repositorio
+[Orchestration](https://github.com/arthuurqueirozz/tech-challenge-3-orchestration).
+Ele prepara credenciais temporarias e configura as tres APIs com SQL/RabbitMQ.
+A stack Kind/Kong final pertence a orquestracao e sera validada nas etapas seguintes.
+
+## CI/CD da Fase 4
+
+O workflow `.github/workflows/ci-cd.yml` executa restore, build Release e o
+executável de testes xUnit em PRs para `main` e pushes nessa branch. PRs não
+recebem credenciais de deploy. Na `main`, o job de deploy serializa as execuções,
+descarta candidatos superados e exige configuração completa antes de publicar.
+
+A imagem recebe `--build-arg BUILD_SHA=<SHA completo>`; seu label OCI e o
+cabeçalho HTTP `X-Build-Sha` identificam essa versão. Sem o argumento, o build
+local usa `development`. O modo administrativo `--migrate` permanece independente
+da configuração do cabeçalho.
+
+Com a sessão STS restrita e a infraestrutura disponíveis, a pipeline publica
+uma tag contendo SHA/execução/tentativa no ECR, resolve o digest, executa o Job
+de migration da mesma imagem e só então atualiza esta API. Confere a versão em
+`/status/users` pelo Kong. Falha de migration bloqueia a troca dos pods;
+falha posterior exige recuperação de imagem compatível, sem rollback de schema.
+
+O guia central `docs/DEPLOY.md` no repositório Orchestration lista variáveis,
+Secrets, nomes dos recursos e pré-condições. `ORCHESTRATION_REF` deve apontar
+para um commit completo revisado e publicado; não use uma branch móvel.
+Para outro repositório privado, configure o token de leitura restrito documentado.
+Sessões e sua expiração precisam ser renovadas antes da janela de deploy.
+
+Os arquivos estão preparados localmente; ativação e execução no GitHub/AWS
+dependem da publicação, permissões e infraestrutura. Validação local não comprova
+conectividade EKS, identidade dos pods ou ausência de interrupção na nuvem.

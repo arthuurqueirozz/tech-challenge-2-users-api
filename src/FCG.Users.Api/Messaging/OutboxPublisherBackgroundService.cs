@@ -1,7 +1,6 @@
 using System.Text.Json;
 using FCG.IntegrationEvents.V1;
 using FCG.Users.Infrastructure.Persistence;
-using MassTransit;
 using Microsoft.EntityFrameworkCore;
 
 namespace FCG.Users.Api.Messaging;
@@ -42,7 +41,7 @@ public sealed class OutboxPublisherBackgroundService(
         }
     }
 
-    private async Task PublishPendingMessagesAsync(CancellationToken cancellationToken)
+    internal async Task PublishPendingMessagesAsync(CancellationToken cancellationToken)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var context = scope.ServiceProvider.GetRequiredService<UsersDbContext>();

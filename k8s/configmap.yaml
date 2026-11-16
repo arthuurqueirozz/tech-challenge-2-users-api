@@ -8,9 +8,8 @@ data:
   Jwt__Issuer: FCG
   Jwt__Audience: FCG
   Jwt__AccessTokenMinutes: "120"
-  RabbitMq__Host: rabbitmq
-  RabbitMq__Port: "5672"
-  RabbitMq__VirtualHost: /
+  Sqs__Region: us-east-1
+  Sqs__QueueUrl: "https://sqs.us-east-1.amazonaws.com/ACCOUNT_ID/fcg-fase3-user-created"
   AdminSeed__Enabled: "false"
   AdminSeed__Name: FCG Admin
   AdminSeed__Email: admin@fcg.local

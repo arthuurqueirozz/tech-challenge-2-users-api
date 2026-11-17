@@ -61,7 +61,8 @@ app.UseAuthorization();
 app.MapGet("/", () => TypedResults.Ok(new
 {
     service = "FCG Users API",
-    status = "running"
+    status = "running",
+    presentation = "FIAP Fase 4 - 20261117-180454"
 }))
 .WithName("GetServiceStatus");
 

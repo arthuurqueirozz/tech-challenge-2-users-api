@@ -62,7 +62,7 @@ app.MapGet("/", () => TypedResults.Ok(new
 {
     service = "FCG Users API",
     status = "running",
-    presentation = "FIAP Fase 4 - 20261117-215012"
+    presentation = "FIAP Fase 4 - 20261117-222119"
 }))
 .WithName("GetServiceStatus");
 
